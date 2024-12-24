@@ -1,0 +1,1043 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r warning=FALSE,message=FALSE,echo=FALSE}
+co2 = read.csv("CanadaCarEmissions.csv")
+library(tidyverse)
+co2_names = co2 %>% rename(
+  YEAR = MODEL.YEAR,
+  BRAND = MAKE,
+  MODEL = MODEL.....high.output.engine.,
+  CLASS = VEHICLE.CLASS,
+  ENGINE = ENGINE.SIZE..L.,
+  FUEL = FUEL.TYPE,
+  CONSUMPTION = COMB..L.100.km.,
+  EMISSIONS = CO2.EMISSIONS..g.km.)
+
+co2_separated = co2_names %>% separate(TRANSMISSION, into = c("TRANSMISSION", "GEARS"),sep = "(?<=\\D)(?=\\d)")
+```
+
+# Objective
+
+Build a linear regression model to predict a car’s CO2 Emissions (grams / Km). The model will be built by using the “Fuel consumption ratings” dataset from the Government of Canada.
+
+# Project Overview
+
+1.    We made a descriptive analysis to understand the data and decide which variables could be dropped to proceed with the modelling section.
+
+2.    We split the data into 80% for training and 20% for testing.
+
+3.    We applied the variable screening methods to the train data, and all methods suggested a full model which though high in r-squared value it had a pattern in the residual plot. The pattern was eliminated with an interaction and named the model as "Model 8".
+
+4.    We ran some models based on the descriptive analysis, and chose to use a simple model which still had high accuracy, and named the model as "Model 9".
+
+5.    We fitted the test data into models 8 and 9 and compared the prediction for the two models.
+
+# Descriptive Analysis
+
+## Numerical variables
+
+-   YEAR
+-   ENGINE
+-   CYLINDERS
+-   CONSUMPTION
+-   EMISSIONS (Response Variable)
+
+### Correlation Matrix
+
+```{r,message=FALSE,warning=FALSE,echo=FALSE}
+library(GGally)
+ggpairs(co2_separated[,c("YEAR","ENGINE","CYLINDERS","CONSUMPTION","EMISSIONS")],
+        title = 'Scatter Plot Matrix Numerical Variables',
+        axisLabels = 'show')
+```
+
+**Insights**
+
+EMISSIONS has three significant correlations with the other three numerical variables:
+
+-   Emissions vs Fuel Consumption: 0.935
+
+-   Emissions vs Engine: 0.799
+
+-   Emissions vs Cylinders: 0.766
+
+CYLINDERS has a high correlation with ENGINE: 0.910
+
+### Categorical Variables
+
+-   Brand: 55 levels.
+
+-   Model: 4185 levels.
+
+-   Class: 17 levels.
+
+-   Transmission: 5 levels.
+
+-   Fuel: 5 levels.
+
+-   Gears: 9 levels.
+
+We are not going to consider Model in the Analysis, as this variables has a large number of categories, and it not provide useful information to predict emissions.
+
+#### FUEL
+
+```{r,echo=FALSE}
+co2_recode = co2_separated %>% mutate(FUEL =
+                                        recode(FUEL,
+                                               "D"="Diesel",
+                                               "E"="Etanol",
+                                               "N"="NaturalGas",
+                                               "X"="Regular",
+                                               "Z"="Premium"))
+```
+
+
+
+```{r,echo=FALSE,fig.dim=c(5,4), fig.align='center'}
+ggplot(co2_recode,
+       aes(x = FUEL, y = EMISSIONS, fill = FUEL))+
+  geom_boxplot()
+```
+
+**Insights:**
+
+-   The median CO2 emission for premium, regular and diesel are very close from each other, and they are surpassed by Ethanol and Natural Gas.
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_recode,
+       aes(x = as.factor(YEAR), fill = FUEL)) +
+  geom_bar() +
+  labs(
+    x = "Year of Manufacture",
+    y = "Count of Fuel Types",
+    title = "Bar Plot of Fuel Types by Year"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+**Insights:**
+
+-   The majority of cars in the data set uses gasoline, which can be premium or regular in similar proportions. Ethanol grew in 2007 but the number was reduced by 2015.
+
+```{r,warning=FALSE,message=FALSE, echo=FALSE,fig.align='center'}
+ggplot(co2_recode, 
+         aes(x = CONSUMPTION,
+             y = EMISSIONS,
+             colour = FUEL))+
+    geom_point()+
+    labs(title = "FUEL IN CONSUMPTION", x = "CONSUMPTION", y = "EMISSIONS")+
+    geom_smooth(method=lm)
+
+ggplot(co2_recode, 
+         aes(x = ENGINE,
+             y = EMISSIONS,
+             colour = FUEL))+
+    geom_point()+
+    labs(title = "FUEL IN ENGINE SIZE", x = "ENGINE SIZE", y = "EMISSIONS")+
+    geom_smooth(method=lm)
+
+ggplot(co2_recode, 
+         aes(x = CYLINDERS,
+             y = EMISSIONS,
+             colour = FUEL))+
+    geom_point()+
+    labs(title = "FUEL IN CYLINDERS", x = "CYLINDERS", y = "EMISSIONS")+
+    geom_smooth(method=lm)
+```
+
+**Insights:**
+
+-   The majority of cars uses gasoline and in consumption they are concentrated in the same line, so they could be considered as one type of gasoline. The lines are separated from each other, which makes them the perfect candidate for interaction, CONSUMPTION*FUEL
+
+-   The bigger the engine size, the gasoline premium is more required.
+
+-   From 10 cylinders and above the only fuel used is premium.
+
+#### TRANSMISSION
+
+```{r,echo=FALSE}
+co2_recodet = co2_recode %>% mutate(TRANSMISSION =
+                                        recode(TRANSMISSION,
+                                               "A"="Automatic",
+                                               "AM"="AutomatedManual",
+                                               "AS"="AutomaticSShift",
+                                               "AV"="ContinuosVariable",
+                                               "M"="Manual"))
+```
+
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_recodet,
+       aes(x = TRANSMISSION, y = EMISSIONS, fill = TRANSMISSION))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+**Insights:**
+
+-   Continuous variable has the lowest co2 emission. This type of automatic transmission uses pulleys and a steel band instead of traditional fixed gears. The CVT can change the gear ratio forever to maintain the engine running at peak efficiency. On the whole, the more gears offered in a typical automatic transmission, the better engine power is optimized.
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_recodet,
+       aes(x = as.factor(YEAR), fill = TRANSMISSION)) +
+  geom_bar() +
+  labs(
+    x = "Year of Manufacture",
+    y = "Count of Transmission Types",
+    title = "Bar Plot of Transmission Types by Year"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+**Insights:**
+
+-   Automatic with selected Shift transmission grew considerably since 2005, and now is the main offer in the market. This kind of transmission allows to choose between fully automatic shifting or semi-automatic, clutch-less shifting.
+
+```{r,warning=FALSE,message=FALSE,echo=FALSE,fig.align='center'}
+ggplot(co2_recodet, 
+         aes(x = CONSUMPTION,
+             y = EMISSIONS,
+             colour = TRANSMISSION))+
+    geom_point()+
+    labs(title = "TRANSMISSION IN CONSUMPTION", x = "CONSUMPTION", y = "EMISSIONS")+
+    geom_smooth(method=lm)
+
+ggplot(co2_recodet, 
+         aes(x = ENGINE,
+             y = EMISSIONS,
+             colour = TRANSMISSION))+
+    geom_point()+
+    labs(title = "TRANSMISSION IN ENGINE SIZE", x = "ENGINE SIZE", y = "EMISSIONS")+
+    geom_smooth(method=lm)
+
+ggplot(co2_recodet, 
+         aes(x = CYLINDERS,
+             y = EMISSIONS,
+             colour = TRANSMISSION))+
+    geom_point()+
+    labs(title = "TRANSMISSION", x = "CYLINDERS", y = "EMISSIONS")+
+    geom_smooth(method=lm)
+```
+
+**Insights:**
+
+-   In consumption vs emissions, all the transmission lines are close to each other, which means that all transmission types are dispersed.
+
+-   In engine size vs emissions, all the transmission lines are close to each other.
+
+-   In cylinder vs emission, all the transmission lines are close to each other but continuous variable shift, which is also the most efficient for emission. We might see some interaction between transmission*cylinders, all the the effect would be solely in continuous variable shift.
+
+#### CLASS
+
+-   There are 17 levels in CLASS, so with the purpose of analyze a way to consider this variable in the model, we are going to consider a way to unify categories and reduce the number of levels.
+
+```{r,echo=FALSE}
+co2_upper = co2_recodet %>% mutate(CLASS = toupper(CLASS)) %>%
+  mutate(BRAND = toupper(BRAND)) %>%
+  mutate(CLASS=factor(gsub(" ", "", as.character(CLASS)))) %>%
+  mutate(CLASS = recode(CLASS,
+                               "SUV:SMALL"="SUV-SMALL",
+                               "SUV:STANDARD"="SUV-STANDARD",
+                               "PICKUPTRUCK:SMALL"="PICKUPTRUCK-SMALL",
+                               "PICKUPTRUCK:STANDARD"="PICKUPTRUCK-STANDARD",
+                               "STATIONWAGON:SMALL"="STATIONWAGON-SMALL",
+                               "STATIONWAGON:MID-SIZE"="STATIONWAGON-MID-SIZE",
+                               "VAN:PASSENGER"="VAN-PASSENGER"))
+```
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_upper,
+       aes(x = CLASS, y = EMISSIONS, fill = CLASS))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))+
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")         
+  )
+```
+
+```{r,echo=FALSE,fig.align='center'}
+co2_median = co2_upper %>%
+  mutate(CLASS = reorder(CLASS, EMISSIONS, FUN = median, decreasing = TRUE))
+
+ggplot(co2_median,
+       aes(x = CLASS, y = EMISSIONS, fill = CLASS)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  theme(legend.position = "top") +
+  theme(
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 6),
+    legend.key.size = unit(0.3, "cm")
+  )
+```
+
+**Insights**
+
+-   In the case of unifying CLASS by the name, for example: Pickup Truck, Station Wagon, SUV, VAN, it would not be appropriate, since among these exist differences in the median emissions.
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_upper,
+       aes(x = as.factor(CYLINDERS), fill = CLASS)) +
+  geom_bar() +
+  labs(
+    x = "Cylinders",
+    y = "Classes",
+    title = "Bar Plot of Classes by Cylinders"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))+
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")         
+  )
+```
+
+**Insights**
+
+-   There is no clear pattern if trying to unified classes by cylinders. There are many classes per each discrete number in the variable.
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_upper,
+       aes(x = as.factor(ENGINE), fill = CLASS)) +
+  geom_bar() +
+  labs(
+    x = "Engine Size",
+    y = "Classes",
+    title = "Bar Plot of Classes by Engine Size"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")         
+  )
+```
+
+**Insights**
+
+-   There is no clear pattern if trying to unified classes by engine size.
+
+**Conclusion**
+
+-   We are dropping the variable CLASS as a possible candidate to predictor in the model.
+
+#### GEARS
+
+```{r,echo=FALSE,fig.align='center'}
+co2_filled = co2_upper %>% mutate(GEARS = ifelse(is.na(GEARS),1,GEARS)) %>%
+  mutate(GEARS = ifelse(GEARS > 1 & TRANSMISSION == "ContinuosVariable", 1,GEARS)) %>%
+  mutate(GEARS = as.numeric(GEARS))
+
+ggplot(co2_filled,
+       aes(x = as.factor(GEARS), y = EMISSIONS, fill = as.factor(GEARS)))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))+
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")         
+  )
+```
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_filled,
+       aes(x = as.factor(GEARS), fill = TRANSMISSION)) +
+  geom_bar() +
+  labs(
+    x = "Number of Gears",
+    y = "Transmissions",
+    title = "Bar Plot of Transmission by Gears"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")         
+  )
+```
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(co2_filled,
+       aes(x = TRANSMISSION, fill = as.factor(GEARS))) +
+  geom_bar() +
+  labs(
+    x = "Number of Gears",
+    y = "Transmissions",
+    title = "Bar Plot of Transmission by Gears"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")         
+  )
+```
+
+**Insights**
+
+-   Filled the NA values in Gears with 1 after analyzing that all the empty values corresponded to the Continuous Variable TRANSMISSION.
+
+-   For the purpose of consider GEARS in the model, it will be considered as numerical instead of categorical, and limit the number of coefficients (dummy variables).
+
+```{r,message=FALSE,warning=FALSE, echo=FALSE}
+ggpairs(co2_filled[,c("YEAR","ENGINE","CYLINDERS","CONSUMPTION","EMISSIONS","GEARS")],
+        title = 'Scatter Plot Matrix Numerical Variables',
+        axisLabels = 'show')
+```
+
+**Insights**
+
+- GEARS is not greatly correlated with any of the other numerical variables.
+
+#### BRAND
+
+```{r,echo=FALSE,fig.align='center',warning=FALSE}
+ggplot(co2_filled,
+       aes(x = BRAND, y = EMISSIONS, fill = BRAND))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))+
+  theme(legend.position = "top") +
+   theme(
+    legend.title = element_text(size = 12),   
+    legend.text = element_text(size = 6),    
+    legend.key.size = unit(0.3, "cm")
+   )
+```
+
+```{r,echo=FALSE,fig.align='center'}
+brand_emissions =  co2_filled %>%
+  group_by(BRAND) %>%
+  summarise(BRAND_EMISSION = mean(EMISSIONS))
+
+ggplot(brand_emissions, aes(x = reorder(BRAND, -BRAND_EMISSION), y = BRAND_EMISSION))+
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Average CO2 Emissions by Brand",
+    x = "Brand",
+    y = "Average Emissions"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  geom_hline(yintercept = mean(co2_filled$EMISSIONS), linetype = "dashed", color = "red", size = 0.5)
+```
+
+**Insights**
+
+-   The Brand with the highest average emission is Bugatti, and in general the brands that produce the high-end cars.
+
+-   Never the less, for its high amount of levels, we are dropping the variable for further analysis.
+
+# Data preparation
+
+```{r,echo=FALSE}
+variables_to_remove = c("CO2.Rating",
+                      "Smog.Rating",
+                      "COMB..mpg.",
+                      "FUEL.CONSUMPTION.CITY..L.100.",
+                      "FUEL.CONSUMPTION.HWY..L.100.",
+                      "MODEL",
+                      "BRAND",
+                      "CLASS")
+
+co2_filter = co2_filled %>% dplyr::select(-dplyr::all_of(variables_to_remove)) %>%
+  mutate(FUEL = as.factor(FUEL)) %>%
+  mutate(TRANSMISSION = as.factor(TRANSMISSION))
+```
+
+## Training and Testing Data
+
+```{r}
+set.seed(123)
+
+test_index = sample(seq_len(nrow(co2_filter)),size=0.2*nrow(co2_filter))
+
+co2_test = co2_filter[test_index, ]
+
+co2_train = co2_filter[-test_index,]
+
+write.csv(co2_train, "train.csv")
+
+write.csv(co2_test, "test.csv")
+```
+
+```{r}
+attach(co2_train)
+```
+
+# Software model
+
+## Stepwise Regression
+
+### Both: Step
+
+```{r}
+step(lm(EMISSIONS~.,data = co2_train),direction = "both")
+```
+
+### Both: MASS
+
+```{r warning=TRUE}
+library(MASS)
+stepAIC(lm(EMISSIONS~.,data=co2_train),direction="both")
+```
+
+### Forward: List
+
+```{r}
+mfl = lm(EMISSIONS~1,data=co2_train)
+forwardAIC = step(mfl,scope=list(lower=~1, 
+                                upper= ~ CONSUMPTION + CYLINDERS + ENGINE + FUEL + GEARS + TRANSMISSION + YEAR),
+                   direction="forward", data=co2_train)
+```
+
+### Forward: formula
+
+```{r}
+mff=lm(EMISSIONS~CONSUMPTION + CYLINDERS + ENGINE + FUEL + GEARS + TRANSMISSION + YEAR)
+forwardAIC1 <- step(mfl,scope=formula(mff),
+                   direction="forward", data=co2_train)
+
+forwardAIC1$coefficients
+forwardAIC1$anova
+```
+
+### Backward: Step
+
+```{r}
+step(lm(EMISSIONS~.,data = co2_train),direction = "backward")
+```
+
+## All Possible Regression Subset
+
+### Regsubset
+
+```{r}
+library(leaps)
+subset_model1 = regsubsets(EMISSIONS~CONSUMPTION + CYLINDERS + ENGINE + FUEL + GEARS + TRANSMISSION + YEAR, data = co2_train, nvmax = 15)
+summary(subset_model1)
+```
+
+### Results
+
+```{r}
+SUM = summary(subset_model1)
+names(SUM)
+```
+
+```{r}
+Rsq=SUM$rsq
+CP=SUM$cp
+AdRsq=SUM$adjr2
+BIC=SUM$bic
+RSS=SUM$rss
+
+cbind(SUM$which,round(cbind(Rsq,AdRsq,CP,BIC,RSS),4))
+```
+
+```{r}
+n = length(co2_train$EMISSIONS) #number of observations
+p = apply(SUM$which, 1, sum) #number of variables
+```
+
+```{r}
+#Calculation of AIC
+AIC = SUM$bic - log(n) * p + 2 * p
+
+#number of independent variables in the models
+I=p-1
+MSE1=RSS/(n-I-1)
+```
+
+```{r}
+SUM$which
+```
+
+```{r,echo=FALSE}
+# m1=lm(EMISSIONS~CONSUMPTION)
+# s1=summary(m1)
+# m2=lm(EMISSIONS~CONSUMPTION+FUEL)
+# s2=summary(m2)
+# m3=lm(EMISSIONS~CONSUMPTION+FUEL+YEAR)
+# s3=summary(m3)
+# m4=lm(EMISSIONS~CONSUMPTION+FUEL+YEAR+GEARS)
+# s4=summary(m4)
+# m5=lm(EMISSIONS~CONSUMPTION+FUEL+YEAR+GEARS+TRANSMISSION)
+# s5=summary(m5)
+# m6=lm(EMISSIONS~CONSUMPTION+FUEL+YEAR+GEARS+TRANSMISSION+ENGINE)
+# s6=summary(m6)
+# m7=lm(EMISSIONS~CONSUMPTION+FUEL+YEAR+GEARS+TRANSMISSION+ENGINE+CYLINDERS)
+# s7=summary(m7)
+```
+
+```{r,echo=FALSE}
+# library(qpcR)
+# n1=qpcR::PRESS(m1)
+# a1=n1$stat
+# b1=s1$sigma
+# n2=qpcR::PRESS(m2)
+# a2=n2$stat
+# b2=s2$sigma
+# n3=qpcR::PRESS(m3)
+# a3=n3$stat
+# b3=s3$sigma
+# n4=qpcR::PRESS(m4)
+# a4=n4$stat
+# b4=s4$sigma
+# n5=qpcR::PRESS(m5)
+# a5=n5$stat
+# b5=s5$sigma
+# n6=qpcR::PRESS(m6)
+# a6=n6$stat
+# b6=s6$sigma
+# n7=qpcR::PRESS(m7)
+# a7=n7$stat
+# b7=s7$sigma
+# 
+# PRESS=c(a1,a2,a3,a4,a5,a6,a7)
+# MSE=(c(b1, b2, b3, b4, b5, b6, b7))^2
+# 
+# #Result
+# cbind(SUM$which,round(cbind(Rsq,AdRsq,CP,BIC,RSS,AIC, PRESS, MSE,MSE1),4))
+```
+
+```{r}
+results_df = data.frame(
+  Model = SUM$which,
+  Rsq = round(Rsq, 4),
+  AdRsq = round(AdRsq, 4),
+  CP = round(CP, 4),
+  BIC = round(BIC, 4),
+  RSS = round(RSS, 4),
+  AIC = round(AIC, 4),
+  MSE1 = round(MSE1, 4)
+)
+
+results_df
+```
+
+### Plots
+
+```{r,echo=FALSE,fig.align='center'}
+ggplot(results_df, aes(x = seq(1,13,1), y = Rsq)) +
+  geom_point(color = "blue") +           # Scatterplot points
+  geom_smooth(method = "loess", se = TRUE, color = "red") +  # Linear trendline
+  labs(title = "R Squared vs Number of Variables", 
+       x = "Number of Variables", 
+       y = "R Squared") +
+  theme_minimal()
+
+ggplot(results_df, aes(x = p, y = AdRsq)) +
+  geom_point(color = "blue") +           # Scatterplot points
+  geom_smooth(method = "loess", se = TRUE, color = "red") +  # Linear trendline
+  labs(title = "Adjusted R Squared vs Number of Variables", 
+       x = "Number of Variables", 
+       y = "Adjusted R Squared") +
+  theme_minimal()
+
+ggplot(results_df, aes(x = p, y = CP)) +
+  geom_point(color = "blue") +           # Scatterplot points
+  geom_smooth(method = "loess", se = TRUE, color = "red") +  # Linear trendline
+  labs(title = "Scatterplot with Trendline", 
+       x = "X Values", 
+       y = "Y Values") +
+  theme_minimal()
+
+```
+
+**Insights**
+
+-   All the screening methods had the same result:
+
+**EMISSIONS ~ CONSUMPTION+FUEL+YEAR+GEARS+TRANSMISSION+ENGINE**
+
+-   The adjusted r-squared was very high for all the options reviewed in the all possible method, which could lead to considering smaller models.
+
+### Model 7: result from screening methods
+
+```{r}
+model7 = lm(data = co2_train,
+            formula = EMISSIONS ~ CONSUMPTION+FUEL+YEAR+GEARS+TRANSMISSION+ENGINE)
+s_model7 = summary(model7)
+s_model7
+```
+
+#### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data7 = data.frame(CONSUMPTION,FUEL,YEAR,GEARS,TRANSMISSION,ENGINE)
+predicted_values7 = predict(model7, predicted_data7)
+
+plot(x=predicted_values7,
+     y=residuals(model7),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 7 Residuals")
+ree7 = s_model7$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree7, col="red",lwd=2, lty=2)
+abline(h=-2*ree7, col="red",lwd=2, lty=2)
+```
+
+```{r,echo=FALSE,fig.align='center'}
+plot(model7,
+     which = c(2,3,5),
+     pch=19,
+     col="blue")
+```
+
+**Insights**
+
+-   In the residual plot, it can be seen a pattern out of the 2*REE threshold.
+
+### Model 8: Model 7 plus Interaction
+
+```{r}
+model8 = lm(data=co2_train,
+            formula = EMISSIONS ~CONSUMPTION+FUEL+YEAR+GEARS+TRANSMISSION+ENGINE+CONSUMPTION*FUEL)
+s_model8 = summary(model8)
+s_model8
+```
+
+#### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data8 = data.frame(CONSUMPTION,FUEL,YEAR,GEARS,TRANSMISSION,ENGINE)
+predicted_values8 = predict(model8, predicted_data8)
+
+plot(x=predicted_values8,
+     y=residuals(model8),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 8 Residuals")
+ree8 = s_model8$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree8, col="red",lwd=2, lty=2)
+abline(h=-2*ree8, col="red",lwd=2, lty=2)
+```
+
+```{r,echo=FALSE,fig.align='center'}
+plot(model8,
+     which = c(2,3,5),
+     pch=19,
+     col="blue")
+```
+
+**Insights**
+
+-   The term with the interaction eliminated the pattern in the residual plot.
+
+-   The model has a high r-squared, a small standard error, and all the coefficients are significant.
+
+# Modeling based on Descriptive Analysis
+
+## Model 1: Numerical Variables
+
+```{r}
+model1 = lm(data = co2_train,
+            formula = EMISSIONS~CONSUMPTION+CYLINDERS+ENGINE)
+s_model1 = summary(model1)
+s_model1
+```
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data = data.frame(CYLINDERS,ENGINE,CONSUMPTION)
+predicted_values = predict(model1, newdata = predicted_data)
+
+plot(x=predicted_values, 
+     y=residuals(model1),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 1 Residuals")
+
+ree1 = s_model1$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree1, col="red",lwd=2, lty=2)
+abline(h=-2*ree1, col="red",lwd=2, lty=2)
+```
+
+## Model 2: Numerical Variables without Consumption
+
+```{r}
+model2 = lm(data = co2_train,
+            formula = EMISSIONS~CYLINDERS+ENGINE)
+s_model2 = summary(model2)
+s_model2
+```
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data2 = data.frame(CYLINDERS,ENGINE)
+predicted_values2 = predict(model2, predicted_data2)
+
+plot(x=predicted_values2,
+     y=residuals(model2),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 2 Residuals")
+
+ree2 = s_model2$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree2, col="red",lwd=2, lty=2)
+abline(h=-2*ree2, col="red",lwd=2, lty=2)
+```
+
+## Model 3: Numerical and Categorical 
+
+```{r}
+model3 = lm(data = co2_train, 
+            formula=EMISSIONS~CONSUMPTION+CYLINDERS+ENGINE+FUEL+TRANSMISSION)
+s_model3 = summary(model3)
+s_model3
+```
+
+**Insights**
+
+-   Cylinders is not significant, because of the high correlation with engine.
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data3 = data.frame(CYLINDERS,ENGINE, CONSUMPTION, FUEL, TRANSMISSION)
+predicted_values3 = predict(model3, predicted_data3)
+
+plot(x=predicted_values3,
+     y=residuals(model3),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 3 Residuals")
+ree3 = s_model3$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree3, col="red",lwd=2, lty=2)
+abline(h=-2*ree3, col="red",lwd=2, lty=2)
+
+```
+
+## Model 4: Model3 without Cylinders
+
+```{r}
+model4 = lm(data = co2_train, 
+            formula=EMISSIONS~CONSUMPTION+ENGINE+FUEL+TRANSMISSION)
+s_model4 = summary(model4)
+s_model4
+```
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data4 = data.frame(ENGINE, CONSUMPTION, FUEL, TRANSMISSION)
+predicted_values4 = predict(model4, predicted_data4)
+
+plot(x=predicted_values4,
+     y=residuals(model4),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 4 Residuals")
+ree4 = s_model4$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree4, col="red",lwd=2, lty=2)
+abline(h=-2*ree4, col="red",lwd=2, lty=2)
+
+```
+
+## Model 5: Model4+Interaction
+
+```{r}
+model5 = lm(data = co2_train, 
+            formula=EMISSIONS~CONSUMPTION+ENGINE+FUEL+TRANSMISSION+CONSUMPTION*FUEL)
+s_model5 = summary(model5)
+s_model5
+```
+
+**INSIGHTS**
+
+- Engine turned negative
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data5 = data.frame(ENGINE, CONSUMPTION, FUEL, TRANSMISSION)
+predicted_values5 = predict(model5, predicted_data5)
+
+plot(x=predicted_values5,
+     y=residuals(model5),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 5 Residuals")
+ree5 = s_model5$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree5, col="red",lwd=2, lty=2)
+abline(h=-2*ree5, col="red",lwd=2, lty=2)
+
+```
+
+## Model 6: Model5-Engine
+
+```{r}
+model6 = lm(data = co2_train, 
+            formula=EMISSIONS~CONSUMPTION+FUEL+TRANSMISSION+CONSUMPTION*FUEL)
+s_model6 = summary(model6)
+s_model6
+```
+
+**Insights**
+
+-   Some fuel categories became not significant by their own (without interaction).
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data6 = data.frame(CONSUMPTION, FUEL, TRANSMISSION)
+predicted_values6 = predict(model6, predicted_data6)
+
+plot(x=predicted_values6,
+     y=residuals(model6),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 6 Residuals")
+ree6 = s_model6$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree6, col="red",lwd=2, lty=2)
+abline(h=-2*ree6, col="red",lwd=2, lty=2)
+```
+
+## Model 9: Simple Model
+
+```{r}
+model9 = lm(data = co2_train, 
+            formula=EMISSIONS~CONSUMPTION+FUEL+CONSUMPTION*FUEL)
+s_model9 = summary(model9)
+s_model9
+```
+
+```{r,echo=FALSE}
+attach(co2_train)
+```
+
+### Detecting unequal Variance
+
+```{r,echo=FALSE,fig.align='center'}
+predicted_data9 = data.frame(co2_train$CONSUMPTION, co2_train$FUEL)
+predicted_values9 = predict(model9, predicted_data9)
+
+plot(x=predicted_values9,
+     y=residuals(model9),  
+     pch=19,
+     col="blue",
+     main = "Residual vs Predicted", 
+     xlab = "Predicted",
+     ylab = "Model 9 Residuals")
+ree9 = s_model9$sigma
+abline(h=0, col="red",lwd=2, lty=2)
+abline(h=2*ree9, col="red",lwd=2, lty=2)
+abline(h=-2*ree9, col="red",lwd=2, lty=2)
+```
+
+```{r,echo=FALSE,fig.align='center'}
+plot(model9,
+     which = c(2,3,5),
+     pch=19,
+     col="blue")
+```
+
+**Conclusion**
+
+-   It was decided to use the model 9 as the chosen model from the descriptive analysis to prioritize the small amount of predictors, and also, model 9 meets of the assumption and has a high adjusted r-square (0.99).  
+
+# Testing 
+
+## Model 8
+
+```{r,echo=FALSE,fig.align='center'}
+predict8.1 = predict(model8, newdata = co2_test)
+predict8.1_df = data.frame(predict8.1)
+
+plot(x=co2_test$EMISSIONS,
+     y=predict8.1_df$predict8.1,
+     pch=19,
+     col="blue",
+     main = expression("Predicted Emissions" ~hat((Y))~ "vs Emissions (Y): Model8"), 
+     xlab = "Emissions",
+     ylab = "Predicted Emissions")
+
+```
+
+## Model 9
+
+```{r,echo=FALSE,fig.align='center'}
+predict9.1 = predict(model9, newdata = co2_test)
+predict9.1_df = data.frame(predict9.1)
+plot(x=co2_test$EMISSIONS,
+     y=predict9.1_df$predict9.1,
+     pch=19,
+     col="blue",
+     main = expression("Predicted Emissions" ~hat((Y))~ "vs Emissions (Y): Model 9"),
+     xlab = "Emissions",
+     ylab = "Predicted Emissions")
+```
+
+## Comparisson between 8 and 9
+
+```{r,echo=FALSE,fig.align='center'}
+par(mfrow=c(1,2))
+plot(x=co2_test$EMISSIONS,
+     y=predict9.1_df$predict9.1,
+     pch=19,
+     col="blue",
+     main = expression(~hat((Y))~ "vs (Y): Model 9"),
+     xlab = "Emissions",
+     ylab = "Predicted Emissions")
+
+plot(x=co2_test$EMISSIONS,
+     y=predict8.1_df$predict8.1,
+     pch=19,
+     col="blue",
+     main = expression(~hat((Y))~ "vs (Y): Model 8"), 
+     xlab = "Emissions",
+     ylab = "Predicted Emissions")
+```
+
+# Conclusions
+
+-   The model obtained from the variable screening method had a pattern in the residual plot, which was eliminated with the interaction between consumption and type of fuel (Model8). This relationship was discovered in the descriptive analysis, and when applying to the suggested model improved the r-squared from 0.994 to 0.9992.
+
+-   The chosen model based on the information gathered in the descriptive analysis (Model9) only has three coefficients, consumption, type of fuel and its interactions, but still has an adjusted r squared of 0.9985 which is highly relevant.
+
+-   As seen in the comparison of the results, when using the testing data, Model 8 and model 9 have similar results which is reasonable as Model 8 has an RMSE of 1.83 and Model 9 has an RMSE of 2.47. 
+
+-   Therefore, the team select to use Model 9 to predict car emissions for its high accuracy, but above all becuase of is simplicity.
